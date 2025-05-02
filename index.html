@@ -1,50 +1,11 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Watercolor Color Wheel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.4.0/color-thief.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/color-thief@2.4.0/dist/color-thief.umd.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -53,12 +14,14 @@
             min-height: 100vh;
             font-family: Arial, sans-serif;
             -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         #ideal-swatch-container {
             display: none;
         }
         .swatch {
             min-height: 100px;
+            touch-action: none;
         }
         .action-btn, .picker-btn {
             padding: 0.75rem 1.5rem;
@@ -70,6 +33,7 @@
             position: relative;
             pointer-events: auto;
             outline: none;
+            touch-action: manipulation;
         }
         .action-btn {
             background-color: #2563eb;
@@ -195,27 +159,22 @@
         let selectedFile = null;
         let isCameraImage = false;
 
-        // Expose toggleIdealSwatch globally
+        // Toggle ideal swatch visibility
         window.toggleIdealSwatch = function(index) {
             const now = Date.now();
-            if (now - lastToggleTime < 300) {
-                console.log('Toggle debounced:', now - lastToggleTime);
-                return;
-            }
+            if (now - lastToggleTime < 300) return;
             lastToggleTime = now;
-            console.log('toggleIdealSwatch called with index:', index);
             try {
                 const idealSwatchContainer = document.getElementById('ideal-swatch-container');
                 const idealBtn = document.getElementById('ideal-swatch-btn');
                 isIdealSwatchVisible = !isIdealSwatchVisible;
                 idealSwatchContainer.style.display = isIdealSwatchVisible ? 'grid' : 'none';
                 idealBtn.textContent = isIdealSwatchVisible ? 'Hide Ideal Color Swatch' : 'View Ideal Color Swatch';
-                if (isIdealSwatchVisible) {
+                if (isIdealSwatchVisible && index !== null) {
                     displayIdealSwatch(index);
                 }
-                console.log('Ideal swatch toggled, visible:', isIdealSwatchVisible);
             } catch (err) {
-                console.error('Error in toggleIdealSwatch:', err);
+                console.error('Error toggling ideal swatch:', err);
                 alert('Error toggling ideal swatches.');
             }
         };
@@ -228,7 +187,6 @@
             canvas.elt.setAttribute('aria-label', 'Interactive watercolor color wheel');
             colorMode(HSB, 360, 100, 100);
             drawColorWheel();
-            console.log('p5.js canvas initialized');
         }
 
         function drawColorWheel() {
@@ -265,101 +223,70 @@
                 selectedColorIndex = index;
                 displaySwatch(index);
                 document.getElementById('ideal-swatch-btn').classList.remove('hidden');
-                console.log('Color selected, index:', index);
             }
         }
 
         function processImage(file, source) {
             try {
-                console.log(`Processing image, source: ${source}`);
-                const confirmBtn = document.getElementById('confirm-image');
                 selectedFile = file;
                 isCameraImage = source === 'camera';
-                confirmBtn.classList.remove('hidden');
-                console.log('Image selected, awaiting confirmation');
+                document.getElementById('confirm-image').classList.remove('hidden');
             } catch (err) {
-                console.error('Error in processImage:', err);
+                console.error('Error processing image:', err);
                 alert('Error selecting image. Please try again.');
             }
         }
 
         function confirmImage() {
+            if (!selectedFile) {
+                alert('No image selected. Please try again.');
+                return;
+            }
             try {
-                if (!selectedFile) {
-                    console.warn('No file selected for confirmation');
-                    alert('No image selected. Please try again.');
-                    return;
-                }
-                console.log('Confirming image, isCameraImage:', isCameraImage);
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const img = new Image();
                     img.src = e.target.result;
                     img.onload = () => {
-                        console.log('Image loaded, dimensions:', img.width, 'x', img.height);
-                        try {
-                            if (typeof ColorThief === 'undefined') {
-                                console.warn('ColorThief undefined, attempting reload');
-                                const script = document.createElement('script');
-                                script.src = 'https://cdn.jsdelivr.net/npm/color-thief@2.4.0/dist/color-thief.umd.min.js';
-                                script.onload = () => {
-                                    console.log('ColorThief reloaded');
-                                    analyzeImage(img);
-                                };
-                                script.onerror = () => {
-                                    console.error('Failed to reload ColorThief');
-                                    alert('Failed to load color picker. Please refresh.');
-                                };
-                                document.head.appendChild(script);
-                            } else {
-                                analyzeImage(img);
-                            }
-                            // Save camera image
-                            if (isCameraImage) {
-                                const fileName = `colorwheel_photo_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
-                                console.log('Triggering download for camera image:', fileName);
-                                const link = document.createElement('a');
-                                link.href = e.target.result;
-                                link.download = fileName;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                console.log('Download triggered');
-                            }
-                        } catch (err) {
-                            console.error('Error setting up image analysis:', err);
-                            alert('Error analyzing image. Please try again.');
+                        if (typeof ColorThief === 'undefined') {
+                            alert('Color picker not loaded. Please refresh.');
+                            return;
+                        }
+                        analyzeImage(img);
+                        if (isCameraImage) {
+                            const fileName = `colorwheel_photo_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+                            const link = document.createElement('a');
+                            link.href = e.target.result;
+                            link.download = fileName;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
                         }
                     };
                     img.onerror = () => {
-                        console.error('Failed to load image');
                         alert('Failed to load image. Please select another.');
                     };
                 };
                 reader.onerror = () => {
-                    console.error('FileReader error');
                     alert('Error reading image. Please try again.');
                 };
                 reader.readAsDataURL(selectedFile);
                 document.getElementById('confirm-image').classList.add('hidden');
                 selectedFile = null;
             } catch (err) {
-                console.error('Error in confirmImage:', err);
+                console.error('Error confirming image:', err);
                 alert('Error confirming image. Please try again.');
             }
         }
 
         function analyzeImage(img) {
             try {
-                console.log('Analyzing image with ColorThief');
                 const colorThief = new ColorThief();
                 const dominantColor = colorThief.getColor(img);
-                console.log('Dominant color extracted:', dominantColor);
                 const closestColorIndex = findClosestColor(dominantColor);
                 selectedColorIndex = closestColorIndex;
                 displaySwatch(closestColorIndex);
                 document.getElementById('ideal-swatch-btn').classList.remove('hidden');
-                console.log('Swatches updated for index:', closestColorIndex);
             } catch (err) {
                 console.error('Error analyzing image:', err);
                 alert('Failed to analyze image colors. Please try again.');
@@ -367,36 +294,25 @@
         }
 
         function findClosestColor(rgb) {
-            try {
-                let minDist = Infinity;
-                let closestIndex = 0;
-                currentColors.forEach((color, index) => {
-                    const dist = Math.sqrt(
-                        (color.rgb[0] - rgb[0]) ** 2 +
-                        (color.rgb[1] - rgb[1]) ** 2 +
-                        (color.rgb[2] - rgb[2]) ** 2
-                    );
-                    if (dist < minDist) {
-                        minDist = dist;
-                        closestIndex = index;
-                    }
-                });
-                console.log('Closest color index:', closestIndex);
-                return closestIndex;
-            } catch (err) {
-                console.error('Error in findClosestColor:', err);
-                throw err;
-            }
+            let minDist = Infinity;
+            let closestIndex = 0;
+            currentColors.forEach((color, index) => {
+                const dist = Math.sqrt(
+                    (color.rgb[0] - rgb[0]) ** 2 +
+                    (color.rgb[1] - rgb[1]) ** 2 +
+                    (color.rgb[2] - rgb[2]) ** 2
+                );
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestIndex = index;
+                }
+            });
+            return closestIndex;
         }
 
         function getContrastColor(rgb) {
-            try {
-                const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
-                return luminance > 0.5 ? [0, 0, 0] : [255, 255, 255];
-            } catch (err) {
-                console.error('Error in getContrastColor:', err);
-                return [0, 0, 0];
-            }
+            const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+            return luminance > 0.5 ? [0, 0, 0] : [255, 255, 255];
         }
 
         function displaySwatch(index) {
@@ -440,16 +356,14 @@
                     `;
                     swatchContainer.appendChild(swatchDiv);
                 });
-                console.log('Swatches displayed for index:', index);
             } catch (err) {
-                console.error('Error in displaySwatch:', err);
+                console.error('Error displaying swatches:', err);
                 alert('Error displaying swatches. Please refresh.');
             }
         }
 
         function displayIdealSwatch(index) {
             try {
-                console.log('displayIdealSwatch called with index:', index);
                 const selectedColor = currentColors[index];
                 const idealSwatchContainer = document.getElementById('ideal-swatch-container');
                 idealSwatchContainer.innerHTML = '';
@@ -480,9 +394,8 @@
                     `;
                     idealSwatchContainer.appendChild(swatchDiv);
                 });
-                console.log('Ideal swatches displayed for index:', index);
             } catch (err) {
-                console.error('Error in displayIdealSwatch:', err);
+                console.error('Error displaying ideal swatches:', err);
                 alert('Error displaying ideal swatches. Please refresh.');
             }
         }
@@ -503,98 +416,83 @@
                 const confirmBtn = document.getElementById('confirm-image');
 
                 if (!cameraBtn || !galleryBtn || !cameraPicker || !galleryPicker || !confirmBtn) {
-                    console.error('One or more elements not found:', { cameraBtn, galleryBtn, cameraPicker, galleryPicker, confirmBtn });
-                    alert('App initialization failed. Please refresh and ensure camera permissions are enabled.');
+                    alert('App initialization failed. Please refresh.');
                     return;
                 }
 
-                function triggerInput(input) {
+                function triggerInput(input, source) {
                     try {
-                        console.log(`Triggering input: ${input.id}`);
                         input.click();
                     } catch (err) {
                         console.error(`Error triggering ${input.id}:`, err);
-                        alert(`Failed to open ${input.id === 'camera-picker' ? 'camera' : 'gallery'}. Please check permissions.`);
+                        alert(`Failed to open ${source}. Please check permissions.`);
                     }
                 }
 
-                cameraBtn.addEventListener('click', () => {
-                    console.log('Camera button clicked');
-                    alert('Opening camera...');
-                    triggerInput(cameraPicker);
-                });
+                function addButtonListeners(btn, input, source) {
+                    btn.addEventListener('click', () => triggerInput(input, source));
+                    btn.addEventListener('touchstart', (e) => {
+                        e.preventDefault();
+                        triggerInput(input, source);
+                    });
+                }
 
-                galleryBtn.addEventListener('click', () => {
-                    console.log('Gallery button clicked');
-                    alert('Opening gallery...');
-                    triggerInput(galleryPicker);
-                });
+                addButtonListeners(cameraBtn, cameraPicker, 'camera');
+                addButtonListeners(galleryBtn, galleryPicker, 'gallery');
 
                 cameraPicker.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files[0]) {
-                        console.log('Camera image selected:', e.target.files[0].name);
                         processImage(e.target.files[0], 'camera');
                     } else {
-                        console.warn('No camera file selected');
-                        alert('No image selected from camera. Please try again.');
+                        alert('No image selected from camera.');
                     }
                 });
 
                 galleryPicker.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files[0]) {
-                        console.log('Gallery image selected:', e.target.files[0].name);
                         processImage(e.target.files[0], 'gallery');
                     } else {
-                        console.warn('No gallery file selected');
-                        alert('No image selected from gallery. Please try again.');
+                        alert('No image selected from gallery.');
                     }
                 });
 
                 confirmBtn.addEventListener('click', confirmImage);
-
-                console.log('Input listeners initialized');
+                confirmBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    confirmImage();
+                });
             } catch (err) {
                 console.error('Error initializing inputs:', err);
-                alert('Failed to initialize app. Please refresh and check permissions.');
+                alert('Failed to initialize app. Please refresh.');
             }
         }
 
         // Initialize app
         window.onload = () => {
-            console.log('Script loaded, initializing app');
-            console.log('User Agent:', navigator.userAgent);
-
-            // Load ColorThief
             if (typeof ColorThief === 'undefined') {
-                console.warn('ColorThief not loaded, attempting fallback');
                 const script = document.createElement('script');
                 script.src = 'https://cdn.jsdelivr.net/npm/color-thief@2.4.0/dist/color-thief.umd.min.js';
-                script.onload = () => console.log('ColorThief loaded from fallback');
-                script.onerror = () => {
-                    console.error('Failed to load ColorThief');
-                    alert('Failed to load color picker. Please refresh.');
-                };
+                script.onload = () => initInputs();
+                script.onerror = () => alert('Failed to load color picker. Please refresh.');
                 document.head.appendChild(script);
             } else {
-                console.log('ColorThief loaded');
+                initInputs();
             }
 
-            // Initialize file inputs
-            initInputs();
-
-            // Ideal swatch button listeners
-            setTimeout(() => {
-                const idealBtn = document.getElementById('ideal-swatch-btn');
-                function handleIdealSwatchClick(e) {
-                    console.log(`Ideal swatch button event: ${e.type}, index:`, selectedColorIndex);
-                    e.preventDefault();
-                    if (selectedColorIndex !== null) {
-                        window.toggleIdealSwatch(selectedColorIndex);
-                    }
+            const idealBtn = document.getElementById('ideal-swatch-btn');
+            function handleIdealSwatchClick(e) {
+                e.preventDefault();
+                if (selectedColorIndex !== null) {
+                    window.toggleIdealSwatch(selectedColorIndex);
+                } else {
+                    alert('Please select a color first.');
                 }
-                idealBtn.addEventListener('click', handleIdealSwatchClick);
-                console.log('Ideal swatch button listeners attached');
-            }, 500);
+            }
+            idealBtn.addEventListener('click', handleIdealSwatchClick);
+            idealBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleIdealSwatchClick(e);
+            });
         };
     </script>
 </body>

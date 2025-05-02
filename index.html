@@ -1,0 +1,622 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Watercolor Color Wheel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.4.0/color-thief.umd.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow-y: auto;
+            height: auto;
+            font-family: Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            -webkit-touch-callout: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #ideal-swatch-container {
+            display: none;
+        }
+        .swatch {
+            min-height: 100px;
+        }
+        .action-btn, .picker-btn {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            z-index: 30000;
+            border-radius: 8px;
+            transition: background-color 0.2s, transform 0.1s;
+            touch-action: manipulation;
+            position: relative;
+            pointer-events: auto;
+            user-select: none;
+            will-change: transform;
+            outline: none;
+        }
+        .action-btn {
+            background-color: #2563eb;
+            color: white;
+        }
+        .picker-btn {
+            background-color: #e5e7eb;
+            border: 1px solid #ccc;
+            color: #374151;
+        }
+        .action-btn:hover {
+            background-color: #1d4ed8;
+        }
+        .picker-btn:hover {
+            background-color: #d1d5db;
+        }
+        .action-btn:active, .picker-btn:active {
+            transform: scale(0.98);
+        }
+        @media (max-width: 640px) {
+            #swatch-container, #ideal-swatch-container {
+                grid-template-columns: 1fr;
+            }
+            .p-4 {
+                padding: 0.5rem;
+            }
+            .swatch {
+                min-height: 80px;
+            }
+            .action-btn, .picker-btn {
+                padding: 0.5rem 1rem;
+                font-size: 0.9rem;
+            }
+        }
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center p-4">
+    <h1 class="text-2xl font-bold text-gray-800 mb-4">Watercolor Color Wheel</h1>
+    <p class="text-gray-600 mb-4 text-center">Tap a color or use the buttons below to analyze an image. Toggle ideal colors below.</p>
+    
+    <div class="flex flex-col sm:flex-row gap-4 mb-4">
+        <button id="camera-btn" class="picker-btn text-center">Take Photo</button>
+        <input type="file" id="camera-picker" accept="image/*" capture="environment">
+        <button id="gallery-btn" class="picker-btn text-center">Choose Image</button>
+        <input type="file" id="gallery-picker" accept="image/*">
+        <button id="confirm-image" class="picker-btn hidden">Confirm Image</button>
+    </div>
+    
+    <div id="canvas-container" class="mb-4"></div>
+    <button id="ideal-swatch-btn" class="hidden mb-4 action-btn" aria-label="Toggle ideal color swatch">View Ideal Color Swatch</button>
+    <div id="swatch-container" class="grid grid-cols-2 gap-4 w-full max-w-md mb-4"></div>
+    <div id="ideal-swatch-container" class="grid grid-cols-2 gap-4 w-full max-w-md"></div>
+
+    <script>
+        // Watercolor palette
+        const watercolorColors = [
+            { name: "Cobalt Blue", brand: "Daniel Smith", pigment: "PB28", hue: 240, rgb: [0, 51, 153], shadow: "Warm Grey Orange" },
+            { name: "Cerulean Blue", brand: "Winsor & Newton", pigment: "PB35", hue: 210, rgb: [0, 110, 200], shadow: "Warm Grey Brown" },
+            { name: "Cobalt Turquoise Light", brand: "Daniel Smith", pigment: "PB36", hue: 180, rgb: [0, 160, 160], shadow: "Warm Grey" },
+            { name: "Purple Lake", brand: "Winsor & Newton", pigment: "PV19", hue: 300, rgb: [120, 0, 120], shadow: "Warm Grey Yellow" },
+            { name: "Indian Yellow", brand: "Winsor & Newton", pigment: "PY139", hue: 50, rgb: [255, 180, 0], shadow: "Cool Blueish Purple" },
+            { name: "Jaune Brilliant", brand: "Holbein", pigment: "PW6/PY3", hue: 60, rgb: [255, 200, 100], shadow: "Cool Grey Purple" },
+            { name: "Yellow Ochre", brand: "Daniel Smith", pigment: "PY43", hue: 45, rgb: [204, 153, 0], shadow: "Cool Blueish Grey" },
+            { name: "Burnt Sienna", brand: "Winsor & Newton", pigment: "PBr7", hue: 15, rgb: [204, 85, 0], shadow: "Cool Blueish Grey" },
+            { name: "Scarlet Lake", brand: "Holbein", pigment: "PR188", hue: 10, rgb: [220, 60, 60], shadow: "Cool Grey Green" },
+            { name: "Pyrrol Orange", brand: "Daniel Smith", pigment: "PO73", hue: 30, rgb: [255, 102, 0], shadow: "Cool Grey Blue" },
+            { name: "Rose Madder Permanent", brand: "Daniel Smith", pigment: "PR209", hue: 330, rgb: [204, 0, 102], shadow: "Cool Grey Green" },
+            { name: "Green Gold", brand: "Winsor & Newton", pigment: "PY129", hue: 90, rgb: [153, 204, 0], shadow: "Warm Grey Red" },
+            { name: "Sap Green", brand: "Winsor & Newton", pigment: "PG36/PY110", hue: 100, rgb: [100, 150, 0], shadow: "Warm Grey Red" },
+            { name: "Viridian", brand: "Winsor & Newton", pigment: "PG18", hue: 120, rgb: [0, 140, 0], shadow: "Warm Grey Red" }
+        ];
+
+        // Ideal color RGBs
+        const idealColorRGBs = {
+            "Bright Orange": [255, 128, 0],
+            "Warm Orange": [255, 165, 0],
+            "Bright Red": [255, 0, 0],
+            "Vivid Green": [0, 128, 0],
+            "Cool Purple": [128, 0, 128],
+            "Bright Cyan": [0, 255, 255],
+            "Deep Blue": [0, 0, 139],
+            "Cool Blue": [0, 0, 255],
+            "Bright Yellow": [255, 255, 0],
+            "Cool Cyan": [0, 139, 139],
+            "Warm Grey": [139, 139, 139],
+            "Warm Grey Orange": [139, 120, 100],
+            "Warm Grey Brown": [139, 100, 80],
+            "Warm Grey Yellow": [139, 139, 100],
+            "Cool Blueish Purple": [100, 100, 139],
+            "Cool Grey Purple": [120, 120, 139],
+            "Cool Blueish Grey": [120, 120, 139],
+            "Cool Grey Green": [100, 139, 120],
+            "Cool Grey Blue": [100, 120, 139],
+            "Bright Green": [0, 255, 0],
+            "Neutral": [139, 139, 139]
+        };
+
+        // Ideal colors
+        const idealColors = {
+            240: { comp: "Bright Orange", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Cool Cyan", ana2: "Deep Blue", shadow: "Warm Grey Orange" },
+            210: { comp: "Warm Orange", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Cyan", ana2: "Deep Blue", shadow: "Warm Grey Brown" },
+            180: { comp: "Bright Red", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Cyan", ana2: "Cool Blue", shadow: "Warm Grey" },
+            300: { comp: "Bright Yellow", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Cool Blue", ana2: "Bright Red", shadow: "Warm Grey Yellow" },
+            50: { comp: "Cool Purple", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Warm Orange", shadow: "Cool Blueish Purple" },
+            60: { comp: "Cool Purple", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Warm Orange", shadow: "Cool Grey Purple" },
+            45: { comp: "Cool Blue", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Warm Orange", shadow: "Cool Blueish Grey" },
+            15: { comp: "Cool Blue", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Warm Orange", ana2: "Bright Red", shadow: "Cool Blueish Grey" },
+            10: { comp: "Cool Green", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Warm Orange", ana2: "Bright Red", shadow: "Cool Grey Green" },
+            30: { comp: "Cool Blue", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Bright Red", shadow: "Cool Grey Blue" },
+            330: { comp: "Bright Green", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Red", ana2: "Cool Purple", shadow: "Cool Grey Green" },
+            90: { comp: "Bright Red", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Vivid Green", shadow: "Warm Grey Red" },
+            100: { comp: "Bright Red", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Bright Yellow", ana2: "Vivid Green", shadow: "Warm Grey Red" },
+            120: { comp: "Bright Red", sec1: "Vivid Green", sec2: "Warm Orange", sec3: "Cool Purple", ana1: "Vivid Green", ana2: "Cool Cyan", shadow: "Warm Grey Red" }
+        };
+
+        let currentColors = watercolorColors;
+        let selectedColorIndex = null;
+        let isIdealSwatchVisible = false;
+        let lastToggleTime = 0;
+        let selectedFile = null;
+        let isCameraImage = false;
+
+        // Expose toggleIdealSwatch globally
+        window.toggleIdealSwatch = function(index) {
+            const now = Date.now();
+            if (now - lastToggleTime < 300) {
+                console.log('Toggle debounced:', now - lastToggleTime);
+                return;
+            }
+            lastToggleTime = now;
+            console.log('toggleIdealSwatch called with index:', index);
+            try {
+                const idealSwatchContainer = document.getElementById('ideal-swatch-container');
+                const idealBtn = document.getElementById('ideal-swatch-btn');
+                isIdealSwatchVisible = !isIdealSwatchVisible;
+                idealSwatchContainer.style.display = isIdealSwatchVisible ? 'grid' : 'none';
+                idealBtn.textContent = isIdealSwatchVisible ? 'Hide Ideal Color Swatch' : 'View Ideal Color Swatch';
+                if (isIdealSwatchVisible) {
+                    displayIdealSwatch(index);
+                }
+                console.log('Ideal swatch toggled, visible:', isIdealSwatchVisible);
+            } catch (err) {
+                console.error('Error in toggleIdealSwatch:', err);
+                alert('Error toggling ideal swatches.');
+            }
+        };
+
+        // p5.js setup
+        function setup() {
+            const canvasSize = Math.min(window.innerWidth * 0.9, 350);
+            const canvas = createCanvas(canvasSize, canvasSize);
+            canvas.parent('canvas-container');
+            canvas.elt.setAttribute('aria-label', 'Interactive watercolor color wheel');
+            colorMode(HSB, 360, 100, 100);
+            drawColorWheel();
+            console.log('p5.js canvas initialized');
+        }
+
+        function drawColorWheel() {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = width * 0.4;
+            const angleStep = 360 / currentColors.length;
+            for (let i = 0; i < currentColors.length; i++) {
+                const startAngle = radians(i * angleStep);
+                const endAngle = radians((i + 1) * angleStep);
+                fill(currentColors[i].hue, 80, 80);
+                arc(centerX, centerY, radius * 2, radius * 2, startAngle, endAngle, PIE);
+            }
+        }
+
+        function mousePressed() {
+            handleColorSelection();
+        }
+
+        function touchStarted() {
+            handleColorSelection();
+            return false;
+        }
+
+        function handleColorSelection() {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = width * 0.4;
+            const d = dist(mouseX, mouseY, centerX, centerY);
+            if (d <= radius) {
+                let angle = atan2(mouseY - centerY, mouseX - centerX);
+                if (angle < 0) angle += TWO_PI;
+                const index = Math.floor(degrees(angle) / (360 / currentColors.length)) % currentColors.length;
+                selectedColorIndex = index;
+                displaySwatch(index);
+                document.getElementById('ideal-swatch-btn').classList.remove('hidden');
+                console.log('Color selected, index:', index);
+            }
+        }
+
+        function processImage(file, source) {
+            try {
+                console.log(`Processing image, source: ${source}`);
+                const confirmBtn = document.getElementById('confirm-image');
+                selectedFile = file;
+                isCameraImage = source === 'camera';
+                confirmBtn.classList.remove('hidden');
+                console.log('Image selected, awaiting confirmation');
+            } catch (err) {
+                console.error('Error in processImage:', err);
+                alert('Error selecting image.');
+            }
+        }
+
+        function confirmImage() {
+            try {
+                if (!selectedFile) {
+                    console.warn('No file selected for confirmation');
+                    alert('No image selected.');
+                    return;
+                }
+                console.log('Confirming image, isCameraImage:', isCameraImage);
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        console.log('Image loaded, dimensions:', img.width, 'x', img.height);
+                        try {
+                            if (typeof ColorThief === 'undefined') {
+                                console.warn('ColorThief undefined, attempting reload');
+                                const script = document.createElement('script');
+                                script.src = 'https://cdn.jsdelivr.net/npm/color-thief@2.4.0/dist/color-thief.umd.min.js';
+                                script.onload = () => {
+                                    console.log('ColorThief reloaded');
+                                    analyzeImage(img);
+                                };
+                                script.onerror = () => {
+                                    console.error('Failed to reload ColorThief');
+                                    alert('Failed to load color picker.');
+                                };
+                                document.head.appendChild(script);
+                            } else {
+                                analyzeImage(img);
+                            }
+                            // Save camera image
+                            if (isCameraImage) {
+                                const fileName = `colorwheel_photo_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`;
+                                console.log('Triggering download for camera image:', fileName);
+                                const link = document.createElement('a');
+                                link.href = e.target.result;
+                                link.download = fileName;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                console.log('Download triggered');
+                            }
+                        } catch (err) {
+                            console.error('Error setting up image analysis:', err);
+                            alert('Error analyzing image.');
+                        }
+                    };
+                    img.onerror = () => {
+                        console.error('Failed to load image');
+                        alert('Failed to load image.');
+                    };
+                };
+                reader.onerror = () => {
+                    console.error('FileReader error');
+                    alert('Error reading image.');
+                };
+                reader.readAsDataURL(selectedFile);
+                document.getElementById('confirm-image').classList.add('hidden');
+                selectedFile = null;
+            } catch (err) {
+                console.error('Error in confirmImage:', err);
+                alert('Error confirming image.');
+            }
+        }
+
+        function analyzeImage(img) {
+            try {
+                console.log('Analyzing image with ColorThief');
+                const colorThief = new ColorThief();
+                const dominantColor = colorThief.getColor(img);
+                console.log('Dominant color extracted:', dominantColor);
+                const closestColorIndex = findClosestColor(dominantColor);
+                selectedColorIndex = closestColorIndex;
+                displaySwatch(closestColorIndex);
+                document.getElementById('ideal-swatch-btn').classList.remove('hidden');
+                console.log('Swatches updated for index:', closestColorIndex);
+            } catch (err) {
+                console.error('Error analyzing image:', err);
+                alert('Failed to analyze image colors.');
+            }
+        }
+
+        function findClosestColor(rgb) {
+            try {
+                let minDist = Infinity;
+                let closestIndex = 0;
+                currentColors.forEach((color, index) => {
+                    const dist = Math.sqrt(
+                        (color.rgb[0] - rgb[0]) ** 2 +
+                        (color.rgb[1] - rgb[1]) ** 2 +
+                        (color.rgb[2] - rgb[2]) ** 2
+                    );
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestIndex = index;
+                    }
+                });
+                console.log('Closest color index:', closestIndex);
+                return closestIndex;
+            } catch (err) {
+                console.error('Error in findClosestColor:', err);
+                throw err;
+            }
+        }
+
+        function getContrastColor(rgb) {
+            try {
+                const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+                return luminance > 0.5 ? [0, 0, 0] : [255, 255, 255];
+            } catch (err) {
+                console.error('Error in getContrastColor:', err);
+                return [0, 0, 0];
+            }
+        }
+
+        function displaySwatch(index) {
+            try {
+                const selectedColor = currentColors[index];
+                const swatchContainer = document.getElementById('swatch-container');
+                swatchContainer.innerHTML = '';
+                const compIndex = (index + Math.floor(currentColors.length / 2)) % currentColors.length;
+                const compColor = currentColors[compIndex];
+                const secondaryColors = [
+                    currentColors.find(c => c.name.includes("Green") || c.name.includes("Viridian")) || currentColors.find(c => c.hue >= 90 && c.hue <= 120),
+                    currentColors.find(c => c.name.includes("Yellow") || c.name.includes("Orange") || c.name.includes("Sienna")) || currentColors.find(c => c.hue >= 15 && c.hue <= 60),
+                    currentColors.find(c => c.name.includes("Purple") || c.name.includes("Rose") || c.name.includes("Lake")) || currentColors.find(c => c.hue >= 300 && c.hue <= 330)
+                ].filter(c => c);
+                const analog1Index = (index - 1 + currentColors.length) % currentColors.length;
+                const analog2Index = (index + 1) % currentColors.length;
+                const analog1 = currentColors[analog1Index];
+                const analog2 = currentColors[analog2Index];
+                const swatches = [
+                    { label: "Selected", color: selectedColor, rgb: selectedColor.rgb },
+                    { label: "Complementary", color: compColor, rgb: compColor.rgb },
+                    { label: "Secondary (Green)", color: secondaryColors[0], rgb: secondaryColors[0]?.rgb },
+                    { label: "Secondary (Orange/Yellow)", color: secondaryColors[1], rgb: secondaryColors[1]?.rgb },
+                    { label: "Secondary (Purple/Rose)", color: secondaryColors[2], rgb: secondaryColors[2]?.rgb },
+                    { label: "Analogous 1", color: analog1, rgb: analog1.rgb },
+                    { label: "Analogous 2", color: analog2, rgb: analog2.rgb },
+                    { label: "Shadow", color: { name: selectedColor.shadow, brand: "" }, rgb: idealColorRGBs[selectedColor.shadow] || [200, 200, 200] }
+                ].filter(s => s.rgb || s.label === "Shadow");
+                swatches.forEach(swatch => {
+                    const rgb = swatch.rgb || [200, 200, 200];
+                    const textColor = getContrastColor(rgb);
+                    const gradient = `linear-gradient(to bottom, rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 1), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.8), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.6), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.2))`;
+                    const swatchDiv = document.createElement('div');
+                    swatchDiv.className = 'p-4 rounded-lg shadow-md swatch';
+                    swatchDiv.style.background = gradient;
+                    swatchDiv.setAttribute('role', 'region');
+                    swatchDiv.setAttribute('aria-label', `${swatch.label}: ${swatch.color.name}`);
+                    swatchDiv.innerHTML = `
+                        <p class="font-semibold" style="color: rgb(${textColor[0]}, ${textColor[1]}, ${textColor[2]})">${swatch.label}</p>
+                        <p style="color: rgb(${textColor[0]}, ${textColor[1]}, ${textColor[2]})">${swatch.color.name} ${swatch.color.brand ? '(' + swatch.color.brand + ')' : ''}</p>
+                    `;
+                    swatchContainer.appendChild(swatchDiv);
+                });
+                console.log('Swatches displayed for index:', index);
+            } catch (err) {
+                console.error('Error in displaySwatch:', err);
+                alert('Error displaying swatches.');
+            }
+        }
+
+        function displayIdealSwatch(index) {
+            try {
+                console.log('displayIdealSwatch called with index:', index);
+                const selectedColor = currentColors[index];
+                const idealSwatchContainer = document.getElementById('ideal-swatch-container');
+                idealSwatchContainer.innerHTML = '';
+                const ideal = idealColors[selectedColor.hue] || {
+                    comp: "Neutral", sec1: "Neutral", sec2: "Neutral", sec3: "Neutral", ana1: "Neutral", ana2: "Neutral", shadow: "Neutral"
+                };
+                const swatches = [
+                    { label: "Ideal Complementary", name: ideal.comp },
+                    { label: "Ideal Secondary (Green)", name: ideal.sec1 },
+                    { label: "Ideal Secondary (Orange)", name: ideal.sec2 },
+                    { label: "Ideal Secondary (Purple)", name: ideal.sec3 },
+                    { label: "Ideal Analogous 1", name: ideal.ana1 },
+                    { label: "Ideal Analogous 2", name: ideal.ana2 },
+                    { label: "Ideal Shadow", name: ideal.shadow }
+                ];
+                swatches.forEach(swatch => {
+                    const rgb = idealColorRGBs[swatch.name] || [139, 139, 139];
+                    const textColor = getContrastColor(rgb);
+                    const gradient = `linear-gradient(to bottom, rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 1), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.8), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.6), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4), rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.2))`;
+                    const swatchDiv = document.createElement('div');
+                    swatchDiv.className = 'p-4 rounded-lg shadow-md swatch';
+                    swatchDiv.style.background = gradient;
+                    swatchDiv.setAttribute('role', 'region');
+                    swatchDiv.setAttribute('aria-label', `${swatch.label}: ${swatch.name}`);
+                    swatchDiv.innerHTML = `
+                        <p class="font-semibold" style="color: rgb(${textColor[0]}, ${textColor[1]}, ${textColor[2]})">${swatch.label}</p>
+                        <p style="color: rgb(${textColor[0]}, ${textColor[1]}, ${textColor[2]})">${swatch.name}</p>
+                    `;
+                    idealSwatchContainer.appendChild(swatchDiv);
+                });
+                console.log('Ideal swatches displayed for index:', index);
+            } catch (err) {
+                console.error('Error in displayIdealSwatch:', err);
+                alert('Error displaying ideal swatches.');
+            }
+        }
+
+        function windowResized() {
+            const canvasSize = Math.min(window.innerWidth * 0.9, 350);
+            resizeCanvas(canvasSize, canvasSize);
+            drawColorWheel();
+        }
+
+        // Initialize file input listeners
+        function initInputs() {
+            try {
+                const cameraBtn = document.getElementById('camera-btn');
+                const galleryBtn = document.getElementById('gallery-btn');
+                const cameraPicker = document.getElementById('camera-picker');
+                const galleryPicker = document.getElementById('gallery-picker');
+                const confirmBtn = document.getElementById('confirm-image');
+
+                if (!cameraBtn || !galleryBtn || !cameraPicker || !galleryPicker || !confirmBtn) {
+                    console.error('One or more elements not found:', { cameraBtn, galleryBtn, cameraPicker, galleryPicker, confirmBtn });
+                    alert('App initialization failed. Please refresh.');
+                    return;
+                }
+
+                cameraBtn.addEventListener('click', () => {
+                    console.log('Camera button clicked');
+                    alert('Opening camera...');
+                    cameraPicker.click();
+                });
+                cameraBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    console.log('Camera button touched');
+                    alert('Opening camera...');
+                    cameraPicker.click();
+                });
+
+                galleryBtn.addEventListener('click', () => {
+                    console.log('Gallery button clicked');
+                    alert('Opening gallery...');
+                    galleryPicker.click();
+                });
+                galleryBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    console.log('Gallery button touched');
+                    alert('Opening gallery...');
+                    galleryPicker.click();
+                });
+
+                cameraPicker.addEventListener('change', (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        console.log('Camera image selected');
+                        processImage(e.target.files[0], 'camera');
+                    } else {
+                        console.warn('No camera file selected');
+                        alert('No image selected from camera.');
+                    }
+                });
+
+                galleryPicker.addEventListener('change', (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        console.log('Gallery image selected');
+                        processImage(e.target.files[0], 'gallery');
+                    } else {
+                        console.warn('No gallery file selected');
+                        alert('No image selected from gallery.');
+                    }
+                });
+
+                confirmBtn.addEventListener('click', confirmImage);
+                confirmBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    confirmImage();
+                });
+
+                console.log('Input listeners initialized');
+            } catch (err) {
+                console.error('Error initializing inputs:', err);
+                alert('Failed to initialize inputs.');
+            }
+        }
+
+        // Initialize app
+        window.onload = () => {
+            console.log('Script loaded, initializing app');
+            console.log('In iframe:', window.self !== window.top);
+            console.log('User Agent:', window.navigator.userAgent);
+
+            // Load ColorThief
+            if (typeof ColorThief === 'undefined') {
+                console.warn('ColorThief not loaded, attempting fallback');
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/color-thief@2.4.0/dist/color-thief.umd.min.js';
+                script.onload = () => console.log('ColorThief loaded from fallback');
+                script.onerror = () => {
+                    console.error('Failed to load ColorThief');
+                    alert('Failed to load color picker.');
+                };
+                document.head.appendChild(script);
+            } else {
+                console.log('ColorThief loaded');
+            }
+
+            // Initialize file inputs
+            initInputs();
+
+            // Ideal swatch button listeners
+            setTimeout(() => {
+                const idealBtn = document.getElementById('ideal-swatch-btn');
+                function handleIdealSwatchClick(e) {
+                    console.log(`Ideal swatch button event: ${e.type}, index:`, selectedColorIndex);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (selectedColorIndex !== null) {
+                        window.toggleIdealSwatch(selectedColorIndex);
+                    }
+                }
+                idealBtn.addEventListener('click', handleIdealSwatchClick, { capture: true, passive: false });
+                idealBtn.addEventListener('touchstart', handleIdealSwatchClick, { capture: true, passive: false });
+                idealBtn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, { capture: true, passive: false });
+                idealBtn.setAttribute('onclick', 'if (selectedColorIndex !== null) window.toggleIdealSwatch(selectedColorIndex);');
+                console.log('Ideal swatch button listeners attached');
+            }, 500);
+        };
+    </script>
+</body>
+</html>

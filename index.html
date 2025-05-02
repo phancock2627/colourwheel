@@ -1,8 +1,47 @@
-<!DOCTYPE html>
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Watercolor Color Wheel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.4.0/color-thief.umd.min.js"></script>
@@ -10,14 +49,10 @@
     <style>
         body {
             margin: 0;
-            overflow-y: auto;
-            height: auto;
+            overflow-y: scroll;
+            min-height: 100vh;
             font-family: Arial, sans-serif;
             -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;
-            -webkit-touch-callout: none;
-            user-select: none;
-            -webkit-user-select: none;
         }
         #ideal-swatch-container {
             display: none;
@@ -32,11 +67,8 @@
             z-index: 30000;
             border-radius: 8px;
             transition: background-color 0.2s, transform 0.1s;
-            touch-action: manipulation;
             position: relative;
             pointer-events: auto;
-            user-select: none;
-            will-change: transform;
             outline: none;
         }
         .action-btn {
@@ -247,7 +279,7 @@
                 console.log('Image selected, awaiting confirmation');
             } catch (err) {
                 console.error('Error in processImage:', err);
-                alert('Error selecting image.');
+                alert('Error selecting image. Please try again.');
             }
         }
 
@@ -255,7 +287,7 @@
             try {
                 if (!selectedFile) {
                     console.warn('No file selected for confirmation');
-                    alert('No image selected.');
+                    alert('No image selected. Please try again.');
                     return;
                 }
                 console.log('Confirming image, isCameraImage:', isCameraImage);
@@ -276,7 +308,7 @@
                                 };
                                 script.onerror = () => {
                                     console.error('Failed to reload ColorThief');
-                                    alert('Failed to load color picker.');
+                                    alert('Failed to load color picker. Please refresh.');
                                 };
                                 document.head.appendChild(script);
                             } else {
@@ -296,24 +328,24 @@
                             }
                         } catch (err) {
                             console.error('Error setting up image analysis:', err);
-                            alert('Error analyzing image.');
+                            alert('Error analyzing image. Please try again.');
                         }
                     };
                     img.onerror = () => {
                         console.error('Failed to load image');
-                        alert('Failed to load image.');
+                        alert('Failed to load image. Please select another.');
                     };
                 };
                 reader.onerror = () => {
                     console.error('FileReader error');
-                    alert('Error reading image.');
+                    alert('Error reading image. Please try again.');
                 };
                 reader.readAsDataURL(selectedFile);
                 document.getElementById('confirm-image').classList.add('hidden');
                 selectedFile = null;
             } catch (err) {
                 console.error('Error in confirmImage:', err);
-                alert('Error confirming image.');
+                alert('Error confirming image. Please try again.');
             }
         }
 
@@ -330,7 +362,7 @@
                 console.log('Swatches updated for index:', closestColorIndex);
             } catch (err) {
                 console.error('Error analyzing image:', err);
-                alert('Failed to analyze image colors.');
+                alert('Failed to analyze image colors. Please try again.');
             }
         }
 
@@ -411,7 +443,7 @@
                 console.log('Swatches displayed for index:', index);
             } catch (err) {
                 console.error('Error in displaySwatch:', err);
-                alert('Error displaying swatches.');
+                alert('Error displaying swatches. Please refresh.');
             }
         }
 
@@ -451,7 +483,7 @@
                 console.log('Ideal swatches displayed for index:', index);
             } catch (err) {
                 console.error('Error in displayIdealSwatch:', err);
-                alert('Error displaying ideal swatches.');
+                alert('Error displaying ideal swatches. Please refresh.');
             }
         }
 
@@ -472,72 +504,65 @@
 
                 if (!cameraBtn || !galleryBtn || !cameraPicker || !galleryPicker || !confirmBtn) {
                     console.error('One or more elements not found:', { cameraBtn, galleryBtn, cameraPicker, galleryPicker, confirmBtn });
-                    alert('App initialization failed. Please refresh.');
+                    alert('App initialization failed. Please refresh and ensure camera permissions are enabled.');
                     return;
+                }
+
+                function triggerInput(input) {
+                    try {
+                        console.log(`Triggering input: ${input.id}`);
+                        input.click();
+                    } catch (err) {
+                        console.error(`Error triggering ${input.id}:`, err);
+                        alert(`Failed to open ${input.id === 'camera-picker' ? 'camera' : 'gallery'}. Please check permissions.`);
+                    }
                 }
 
                 cameraBtn.addEventListener('click', () => {
                     console.log('Camera button clicked');
                     alert('Opening camera...');
-                    cameraPicker.click();
-                });
-                cameraBtn.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    console.log('Camera button touched');
-                    alert('Opening camera...');
-                    cameraPicker.click();
+                    triggerInput(cameraPicker);
                 });
 
                 galleryBtn.addEventListener('click', () => {
                     console.log('Gallery button clicked');
                     alert('Opening gallery...');
-                    galleryPicker.click();
-                });
-                galleryBtn.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    console.log('Gallery button touched');
-                    alert('Opening gallery...');
-                    galleryPicker.click();
+                    triggerInput(galleryPicker);
                 });
 
                 cameraPicker.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files[0]) {
-                        console.log('Camera image selected');
+                        console.log('Camera image selected:', e.target.files[0].name);
                         processImage(e.target.files[0], 'camera');
                     } else {
                         console.warn('No camera file selected');
-                        alert('No image selected from camera.');
+                        alert('No image selected from camera. Please try again.');
                     }
                 });
 
                 galleryPicker.addEventListener('change', (e) => {
                     if (e.target.files && e.target.files[0]) {
-                        console.log('Gallery image selected');
+                        console.log('Gallery image selected:', e.target.files[0].name);
                         processImage(e.target.files[0], 'gallery');
                     } else {
                         console.warn('No gallery file selected');
-                        alert('No image selected from gallery.');
+                        alert('No image selected from gallery. Please try again.');
                     }
                 });
 
                 confirmBtn.addEventListener('click', confirmImage);
-                confirmBtn.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    confirmImage();
-                });
 
                 console.log('Input listeners initialized');
             } catch (err) {
                 console.error('Error initializing inputs:', err);
-                alert('Failed to initialize inputs.');
+                alert('Failed to initialize app. Please refresh and check permissions.');
             }
         }
 
         // Initialize app
         window.onload = () => {
             console.log('Script loaded, initializing app');
-            console.log('In iframe:', window.self !== window.top);
-            console.log('User Agent:', window.navigator.userAgent);
+            console.log('User Agent:', navigator.userAgent);
 
             // Load ColorThief
             if (typeof ColorThief === 'undefined') {
@@ -547,7 +572,7 @@
                 script.onload = () => console.log('ColorThief loaded from fallback');
                 script.onerror = () => {
                     console.error('Failed to load ColorThief');
-                    alert('Failed to load color picker.');
+                    alert('Failed to load color picker. Please refresh.');
                 };
                 document.head.appendChild(script);
             } else {
@@ -563,18 +588,11 @@
                 function handleIdealSwatchClick(e) {
                     console.log(`Ideal swatch button event: ${e.type}, index:`, selectedColorIndex);
                     e.preventDefault();
-                    e.stopPropagation();
                     if (selectedColorIndex !== null) {
                         window.toggleIdealSwatch(selectedColorIndex);
                     }
                 }
-                idealBtn.addEventListener('click', handleIdealSwatchClick, { capture: true, passive: false });
-                idealBtn.addEventListener('touchstart', handleIdealSwatchClick, { capture: true, passive: false });
-                idealBtn.addEventListener('touchend', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }, { capture: true, passive: false });
-                idealBtn.setAttribute('onclick', 'if (selectedColorIndex !== null) window.toggleIdealSwatch(selectedColorIndex);');
+                idealBtn.addEventListener('click', handleIdealSwatchClick);
                 console.log('Ideal swatch button listeners attached');
             }, 500);
         };
